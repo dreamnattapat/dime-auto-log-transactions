@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# secrets & tokens — never commit
+credentials/
+*.json
+!package.json
+
+# generated state & output
+data/
+logs/
+*.xlsx
+*.log

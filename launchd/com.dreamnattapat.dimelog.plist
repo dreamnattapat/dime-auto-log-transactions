@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dreamnattapat.dimelog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/dreamnattapat/Workspace/dime-auto-log-transactions/venv/bin/python3</string>
+        <string>/Users/dreamnattapat/Workspace/dime-auto-log-transactions/src/main.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dreamnattapat/Workspace/dime-auto-log-transactions/src</string>
+
+    <!-- Runs daily at 08:00. For weekly instead, replace this block with:
+         <key>StartCalendarInterval</key>
+         <dict>
+             <key>Weekday</key><integer>1</integer>  (1 = Monday)
+             <key>Hour</key><integer>8</integer>
+             <key>Minute</key><integer>0</integer>
+         </dict>
+    -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>8</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dreamnattapat/Workspace/dime-auto-log-transactions/logs/launchd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/dreamnattapat/Workspace/dime-auto-log-transactions/logs/launchd.err.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
