@@ -3,7 +3,9 @@ import argparse
 import logging
 import sys
 
+import analytics
 import config
+import dashboard
 import excel_writer
 import gmail_client
 import pdf_parser
@@ -62,6 +64,8 @@ def run(limit: int | None, dry_run: bool) -> None:
 
     if not dry_run:
         state.save_processed_ids(config.PROCESSED_IDS_FILE, processed_ids)
+        dashboard.write_dashboard(config.DASHBOARD_FILE, analytics.build_analytics(config.OUTPUT_EXCEL_FILE))
+        logger.info("Updated dashboard at %s", config.DASHBOARD_FILE)
 
     logger.info("Done. Added=%d Failed=%d", added, failed)
 

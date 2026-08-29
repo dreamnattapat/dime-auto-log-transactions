@@ -51,7 +51,33 @@ ever sees the PDF, the birthdate, or the transaction data.
    adjust the patterns.
 5. **Excel** — appends a row to `data/dime_transactions.xlsx`, skipping
    emails already processed (tracked in `data/processed_ids.json`).
-6. **Schedule** — a `launchd` job runs it daily.
+6. **Dashboard** — after every real (non-dry-run) sync, recomputes realized
+   profit/loss and win rate and writes `data/dashboard.html` — a
+   self-contained static page, no server needed. See below.
+7. **Schedule** — a `launchd` job runs it daily.
+
+## Dashboard
+
+`data/dashboard.html` is regenerated on every sync — just open it in a
+browser (it's a local file, `file://...`, no hosting involved).
+
+- **Realized P&L only** — computed per security using FIFO cost basis (each
+  Buy pushes a lot, each Sell consumes the oldest lots first). No live
+  market price is fetched, so open positions show units + cost basis, not
+  paper gains.
+- **Win rate** — % of closed (Sell) trades with positive P&L.
+- Everything is in THB, using the account's actual THB cash flows
+  (`total_amount_thb`), so FX movement at time of trade is included.
+- Tables are click-to-sort (vanilla JS, no dependencies).
+- If a sell has no matching buy on record (e.g. a holding pre-dating your
+  Gmail history), it's flagged "partial basis" in the trade log rather than
+  silently understating cost.
+
+Regenerate it by hand any time (e.g. after editing the spreadsheet) with:
+
+```bash
+python3 scripts/generate_dashboard.py
+```
 
 ## Where your secrets live
 
@@ -149,6 +175,7 @@ commented-out weekly variant sits right above it in the same file.
 | Dry run, scan only 3 emails | `python3 src/main.py --limit 3 --dry-run` |
 | Full sync | `python3 src/main.py` |
 | Inspect one PDF's raw text | `python3 scripts/dump_pdf_text.py [message_id]` |
+| Regenerate the dashboard | `python3 scripts/generate_dashboard.py` |
 | Re-store birthdate | `python3 scripts/setup_secret.py` |
 | Tail logs | `tail -f logs/dime_log.log` |
 

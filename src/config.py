@@ -10,6 +10,7 @@ TOKEN_FILE = CREDENTIALS_DIR / "token.json"
 
 PROCESSED_IDS_FILE = DATA_DIR / "processed_ids.json"
 OUTPUT_EXCEL_FILE = DATA_DIR / "dime_transactions.xlsx"
+DASHBOARD_FILE = DATA_DIR / "dashboard.html"
 LOG_FILE = LOGS_DIR / "dime_log.log"
 
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
