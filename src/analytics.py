@@ -7,14 +7,20 @@ matched cost is the realized P&L for that trade. Everything is computed in
 THB, using the per-row `total_amount_thb` (already net of VAT/withholding),
 since that's the actual cash cost/proceeds in the account's home currency.
 
-This only computes *realized* P&L (closed trades) — no live market price is
-fetched, so open positions are reported as units + cost basis, not paper
-gains.
+P&L here is *realized* only (closed trades). Open positions are reported as
+units + cost basis; the S&P 500 comparison in benchmark.py is what values
+them at market price.
 """
+import logging
 from collections import deque
+from datetime import date, datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
+
+import benchmark
+
+logger = logging.getLogger(__name__)
 
 # Smallest fraction-of-a-unit we treat as real rather than float residue.
 # Units are logged with up to 7 decimal places, so 1e-4 comfortably clears
@@ -33,6 +39,13 @@ def _to_float(value) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return float(str(value).replace(",", ""))
+
+
+def _trade_date(row: dict) -> date | None:
+    value = row.get("effective_date") or row.get("settlement_date")
+    if not value:
+        return None
+    return datetime.strptime(value, "%d/%m/%Y").date()
 
 
 def _sort_key(row: dict):
@@ -73,9 +86,13 @@ def compute_analytics(transactions: list[dict]) -> dict:
     unparsed_count = len(transactions) - len(ok_rows)
     ok_rows.sort(key=_sort_key)
 
+    # Each lot: (units, cost_per_unit_thb, buy_date, buy_fx)
     lots: dict[str, deque] = {}
     trades = []
     per_security: dict[str, dict] = {}
+    # Signed cash flows from the investor's point of view: buys are money in
+    # (negative), sells are money back out (positive). Used by benchmark.py.
+    cash_flows = []
 
     def sec_stats(security: str) -> dict:
         return per_security.setdefault(
@@ -90,21 +107,37 @@ def compute_analytics(transactions: list[dict]) -> dict:
         if not security or units is None or total_thb is None:
             continue
 
+        trade_date = _trade_date(row)
+        fx = _to_float(row.get("fx_rate_thb_usd"))
+        total_usd = _to_float(row.get("total_amount"))
+        is_sell = row.get("transaction_type") == "Sell"
+        cash_flows.append(
+            {
+                "date": trade_date,
+                "thb": total_thb if is_sell else -total_thb,
+                "usd": None if total_usd is None else (total_usd if is_sell else -total_usd),
+            }
+        )
+
         queue = lots.setdefault(security, deque())
 
-        if row.get("transaction_type") == "Sell":
+        if is_sell:
             units_to_sell = units
             matched_cost = 0.0
+            matched_lots = []
             basis_complete = True
             while units_to_sell > _EPS and queue:
-                lot_units, lot_cost_per_unit = queue[0]
+                lot_units, lot_cost_per_unit, lot_date, lot_fx = queue[0]
                 take = min(lot_units, units_to_sell)
                 matched_cost += take * lot_cost_per_unit
+                matched_lots.append(
+                    {"cost_thb": take * lot_cost_per_unit, "buy_date": lot_date, "buy_fx": lot_fx}
+                )
                 units_to_sell -= take
                 if take >= lot_units - _EPS:
                     queue.popleft()
                 else:
-                    queue[0] = (lot_units - take, lot_cost_per_unit)
+                    queue[0] = (lot_units - take, lot_cost_per_unit, lot_date, lot_fx)
             if units_to_sell > _EPS:
                 basis_complete = False  # sold more than we ever bought
 
@@ -118,6 +151,8 @@ def compute_analytics(transactions: list[dict]) -> dict:
             trades.append(
                 {
                     "date": row.get("effective_date") or row.get("settlement_date"),
+                    "trade_date": trade_date,
+                    "fx": fx,
                     "security": security,
                     "units": units,
                     "proceeds_thb": total_thb,
@@ -126,17 +161,19 @@ def compute_analytics(transactions: list[dict]) -> dict:
                     "pnl_pct": (pnl / matched_cost * 100) if matched_cost else None,
                     "win": pnl > 0,
                     "basis_complete": basis_complete,
+                    "lots": matched_lots,
+                    "spy_pct": None,  # filled in by benchmark.py
                 }
             )
         else:
             # Buy, Reward, Exercise Call/Put: adds a cost-basis lot.
             cost_per_unit = total_thb / units if units else 0.0
-            queue.append((units, cost_per_unit))
+            queue.append((units, cost_per_unit, trade_date, fx))
 
     open_positions = []
     for security, queue in lots.items():
-        open_units = sum(u for u, _ in queue)
-        open_cost = sum(u * c for u, c in queue)
+        open_units = sum(lot[0] for lot in queue)
+        open_cost = sum(lot[0] * lot[1] for lot in queue)
         if open_units > _EPS:
             open_positions.append(
                 {"security": security, "open_units": open_units, "open_cost_basis_thb": open_cost}
@@ -166,8 +203,15 @@ def compute_analytics(transactions: list[dict]) -> dict:
         ),
         "open_positions": sorted(open_positions, key=lambda p: p["security"]),
         "trades": list(reversed(trades)),  # most recent first
+        "cash_flows": cash_flows,
     }
 
 
 def build_analytics(excel_path: Path) -> dict:
-    return compute_analytics(load_transactions(excel_path))
+    result = compute_analytics(load_transactions(excel_path))
+    try:
+        result["benchmark"] = benchmark.build_benchmark(result, excluded=WIN_RATE_EXCLUDED)
+    except Exception as e:  # network/data problems must never break the sync
+        logger.warning("S&P 500 comparison unavailable: %s", e)
+        result["benchmark"] = {"error": str(e)}
+    return result

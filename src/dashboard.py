@@ -43,6 +43,8 @@ tr:last-child td { border-bottom: none; }
 .scroll { overflow-x: auto; }
 .table-wrap { max-height: 480px; overflow-y: auto; border-radius: 10px; }
 .table-wrap table { border-radius: 0; }
+.note { color: var(--muted); font-size: 0.8rem; margin-top: -1.25rem; }
+.card .sub { color: var(--muted); font-size: 0.8rem; margin-top: 0.1rem; font-variant-numeric: tabular-nums; }
 """
 
 JS = """
@@ -108,6 +110,56 @@ def _summary_cards(summary: dict) -> str:
     """
 
 
+def _signed_thb(value: float) -> str:
+    cls = "pos" if value > 0 else "neg" if value < 0 else ""
+    return f'<span class="{cls}">{"+" if value > 0 else "−" if value < 0 else ""}฿{abs(value):,.0f}</span>'
+
+
+def _fmt_pct(value: float | None) -> str:
+    return f"{value:+.1f}%" if value is not None else "–"
+
+
+def _benchmark_section(b: dict | None) -> str:
+    if not b:
+        return ""
+    if "error" in b:
+        return f"""
+    <section>
+        <h2>vs S&amp;P 500</h2>
+        <div class="warn">S&amp;P 500 comparison unavailable this run: {_esc(b['error'])}</div>
+    </section>
+    """
+    diff = b["your_gain_thb"] - b["spy_gain_thb"]
+    verdict = "ahead of" if diff > 0 else "behind" if diff < 0 else "level with"
+    excluded = f" (excl. {', '.join(b['excluded'])})" if b["excluded"] else ""
+    return f"""
+    <section>
+        <h2>vs S&amp;P 500</h2>
+        <div class="cards">
+            <div class="card"><div class="label">Your Total Gain</div>
+                <div class="value">{_signed_thb(b['your_gain_thb'])}</div>
+                <div class="sub">{_fmt_pct(b['your_xirr_pct'])} / yr</div></div>
+            <div class="card"><div class="label">Same Money in S&amp;P 500</div>
+                <div class="value">{_signed_thb(b['spy_gain_thb'])}</div>
+                <div class="sub">{_fmt_pct(b['spy_xirr_pct'])} / yr</div></div>
+            <div class="card"><div class="label">You vs S&amp;P</div>
+                <div class="value">{_signed_thb(diff)}</div>
+                <div class="sub">{verdict} the index</div></div>
+            <div class="card"><div class="label">Trades Beating S&amp;P{_esc(excluded)}</div>
+                <div class="value">{b['trades_beat']} / {b['trades_rated']}</div></div>
+        </div>
+        <p class="note">
+            Mirror portfolio: every buy and sell you made, the same amount bought or sold
+            {_esc(b['symbol'])} on the same day. Total gain = realized P&amp;L + today's value of what's
+            still held. Net money in ฿{b['net_invested_thb']:,.0f}; holdings now worth
+            ฿{b['your_value_thb']:,.0f} vs ฿{b['spy_value_thb']:,.0f} in {_esc(b['symbol'])}.
+            Valued at ฿{b['usd_thb']:.2f}/USD as of {b['as_of']:%Y-%m-%d}. Price return only — dividends
+            excluded on both sides; the mirror pays no fees. % / yr is money-weighted (XIRR).
+        </p>
+    </section>
+    """
+
+
 def _warnings(summary: dict) -> str:
     warnings = []
     if summary["unparsed_count"]:
@@ -170,6 +222,15 @@ def _open_positions_table(rows: list[dict]) -> str:
     """
 
 
+def _fmt_spy_pct(trade: dict) -> str:
+    spy_pct = trade["spy_pct"]
+    if spy_pct is None:
+        return "–"
+    beat = trade["pnl_pct"] is not None and trade["pnl_pct"] > spy_pct
+    mark = '<span class="pos" title="Beat the S&amp;P 500">✓</span> ' if beat else ""
+    return f"{mark}{spy_pct:.1f}%"
+
+
 def _trade_log_table(trades: list[dict]) -> str:
     body = ""
     for t in trades:
@@ -183,6 +244,7 @@ def _trade_log_table(trades: list[dict]) -> str:
             <td data-sort="{t['cost_thb']}">฿{t['cost_thb']:,.2f}</td>
             <td>{_pnl_span(t['pnl_thb'])}</td>
             <td data-sort="{t['pnl_pct'] if t['pnl_pct'] is not None else -999999}">{pct}</td>
+            <td data-sort="{t['spy_pct'] if t['spy_pct'] is not None else -999999}">{_fmt_spy_pct(t)}</td>
         </tr>"""
     return f"""
     <section>
@@ -195,8 +257,9 @@ def _trade_log_table(trades: list[dict]) -> str:
                 <th data-numeric="1">Cost (THB)</th>
                 <th data-numeric="1">P&amp;L (THB)</th>
                 <th data-numeric="1">P&amp;L %</th>
+                <th data-numeric="1">S&amp;P Same Period</th>
             </tr></thead>
-            <tbody>{body or '<tr><td colspan="7">No closed trades yet.</td></tr>'}</tbody>
+            <tbody>{body or '<tr><td colspan="8">No closed trades yet.</td></tr>'}</tbody>
         </table></div>
     </section>
     """
@@ -215,9 +278,10 @@ def render_html(analytics: dict, generated_at: datetime) -> str:
 <body>
 <div class="wrap">
     <h1>Dime! Portfolio Dashboard</h1>
-    <div class="subtitle">Generated {generated_at.strftime('%Y-%m-%d %H:%M')} · realized P&amp;L only, FIFO cost basis, all figures in THB</div>
+    <div class="subtitle">Generated {generated_at.strftime('%Y-%m-%d %H:%M')} · realized P&amp;L on FIFO cost basis, all figures in THB</div>
     {_warnings(summary)}
     {_summary_cards(summary)}
+    {_benchmark_section(analytics.get('benchmark'))}
     {_per_security_table(analytics['per_security'])}
     {_open_positions_table(analytics['open_positions'])}
     {_trade_log_table(analytics['trades'])}

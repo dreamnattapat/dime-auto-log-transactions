@@ -34,7 +34,8 @@ flowchart TD
 ```
 
 Everything right of Gmail runs locally on your Mac — no third-party server
-ever sees the PDF, the birthdate, or the transaction data.
+ever sees the PDF, the birthdate, or the transaction data. The one other
+outbound call is to Yahoo Finance for market prices (see "vs S&P 500" below).
 
 ## How it works
 
@@ -52,7 +53,8 @@ ever sees the PDF, the birthdate, or the transaction data.
 5. **Excel** — appends a row to `data/dime_transactions.xlsx`, skipping
    emails already processed (tracked in `data/processed_ids.json`).
 6. **Dashboard** — after every real (non-dry-run) sync, recomputes realized
-   profit/loss and win rate and writes `data/dashboard.html` — a
+   profit/loss, win rate and the S&P 500 comparison, and writes
+   `data/dashboard.html` — a
    self-contained static page, no server needed. See below.
 7. **Schedule** — a `launchd` job runs it daily.
 
@@ -61,16 +63,28 @@ ever sees the PDF, the birthdate, or the transaction data.
 `data/dashboard.html` is regenerated on every sync — just open it in a
 browser (it's a local file, `file://...`, no hosting involved).
 
-- **Realized P&L only** — computed per security using FIFO cost basis (each
-  Buy pushes a lot, each Sell consumes the oldest lots first). No live
-  market price is fetched, so open positions show units + cost basis, not
-  paper gains.
+- **Realized P&L** — computed per security using FIFO cost basis (each
+  Buy pushes a lot, each Sell consumes the oldest lots first). Open
+  positions show units + cost basis.
 - **Win rate** — % of closed (Sell) trades with positive P&L, excluding
   cash-parking ETFs (`WIN_RATE_EXCLUDED` in `src/analytics.py`, currently
   SGOV). Their return is almost all dividends, which aren't tracked, so their
   sells always look like small losses. They still count toward realized P&L.
 - Everything is in THB, using the account's actual THB cash flows
   (`total_amount_thb`), so FX movement at time of trade is included.
+- **vs S&P 500** (`src/benchmark.py`) — a mirror portfolio: every Buy/Sell
+  you made, the same USD amount bought/sold SPY on the same trade date. Your
+  total gain (realized P&L + today's market value of open positions) is
+  compared with the mirror's, along with each side's annualized
+  money-weighted return (XIRR). The trade log also shows what SPY returned
+  over each closed trade's holding period, with a ✓ where you beat it. Both
+  sides are price-return only (no dividends), valued at today's USD/THB; the
+  mirror pays no fees.
+- **Market prices** come from Yahoo Finance's public chart endpoint
+  (`src/market_data.py`, no API key). Only ticker symbols (SPY, THB=X and the
+  tickers you currently hold) and a date range are sent — nothing about your
+  account. If it's unreachable, the dashboard still builds and just shows a
+  "comparison unavailable" note.
 - Tables are click-to-sort (vanilla JS, no dependencies).
 - If a sell has no matching buy on record (e.g. a holding pre-dating your
   Gmail history), it's flagged "partial basis" in the trade log rather than
@@ -193,5 +207,6 @@ does the same thing.
   `data/processed_ids.json`, so nothing gets double-logged.
 - If Dime! ever changes its PDF layout, only `src/pdf_parser.py` needs
   updating — everything else is unaffected.
-- Nothing in this repo talks to any third party besides Google's Gmail API;
-  the PDF is parsed locally, and the birthdate never leaves your Mac.
+- The only third parties this repo talks to are Google's Gmail API and
+  Yahoo Finance (ticker prices for the S&P 500 comparison). The PDF is parsed
+  locally, and the birthdate never leaves your Mac.
