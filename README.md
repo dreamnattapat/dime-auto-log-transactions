@@ -170,6 +170,11 @@ commented-out weekly variant sits right above it in the same file.
 
 ## Useful commands
 
+**Shortcuts:** run `make` to list them all. The common ones are `make open`
+(view the dashboard), `make dashboard` (rebuild and open), `make sync` (pull
+new trades, rebuild and open) and `make excel`. In Claude Code, `/dime-dashboard`
+does the same thing.
+
 | Task | Command |
 |---|---|
 | Dry run, scan only 3 emails | `python3 src/main.py --limit 3 --dry-run` |
