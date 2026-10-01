@@ -92,11 +92,13 @@ def _summary_cards(summary: dict) -> str:
     pnl_cls = "pos" if pnl > 0 else "neg" if pnl < 0 else ""
     win_rate = summary["win_rate_pct"]
     win_rate_str = f"{win_rate:.0f}%" if win_rate is not None else "–"
+    excluded = summary["win_rate_excluded"]
+    win_rate_label = f"Win Rate (excl. {', '.join(excluded)})" if excluded else "Win Rate"
     return f"""
     <div class="cards">
         <div class="card"><div class="label">Realized P&amp;L</div>
             <div class="value {pnl_cls}">{'+' if pnl > 0 else ''}฿{pnl:,.0f}</div></div>
-        <div class="card"><div class="label">Win Rate</div>
+        <div class="card"><div class="label">{_esc(win_rate_label)}</div>
             <div class="value">{win_rate_str}</div></div>
         <div class="card"><div class="label">Closed Trades</div>
             <div class="value">{summary['total_trades']}</div></div>

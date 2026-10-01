@@ -21,6 +21,11 @@ from openpyxl import load_workbook
 # rounding error from repeated FIFO subtraction without hiding a real lot.
 _EPS = 1e-4
 
+# Cash-parking ETFs left out of the headline win rate. Their return comes
+# almost entirely from dividends (not tracked here), so every sell looks like
+# a small fee/FX loss. They still count toward realized P&L.
+WIN_RATE_EXCLUDED = {"SGOV"}
+
 
 def _to_float(value) -> float | None:
     if value in (None, ""):
@@ -142,12 +147,16 @@ def compute_analytics(transactions: list[dict]) -> dict:
     total_pnl = sum(t["pnl_thb"] for t in trades)
     incomplete_basis_trades = sum(1 for t in trades if not t["basis_complete"])
 
+    rated_trades = [t for t in trades if t["security"] not in WIN_RATE_EXCLUDED]
+    rated_wins = sum(1 for t in rated_trades if t["win"])
+
     return {
         "summary": {
             "total_realized_pnl_thb": total_pnl,
             "total_trades": total_trades,
             "total_wins": total_wins,
-            "win_rate_pct": (total_wins / total_trades * 100) if total_trades else None,
+            "win_rate_pct": (rated_wins / len(rated_trades) * 100) if rated_trades else None,
+            "win_rate_excluded": sorted(WIN_RATE_EXCLUDED),
             "open_position_count": len(open_positions),
             "unparsed_count": unparsed_count,
             "incomplete_basis_trades": incomplete_basis_trades,

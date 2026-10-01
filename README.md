@@ -65,7 +65,10 @@ browser (it's a local file, `file://...`, no hosting involved).
   Buy pushes a lot, each Sell consumes the oldest lots first). No live
   market price is fetched, so open positions show units + cost basis, not
   paper gains.
-- **Win rate** — % of closed (Sell) trades with positive P&L.
+- **Win rate** — % of closed (Sell) trades with positive P&L, excluding
+  cash-parking ETFs (`WIN_RATE_EXCLUDED` in `src/analytics.py`, currently
+  SGOV). Their return is almost all dividends, which aren't tracked, so their
+  sells always look like small losses. They still count toward realized P&L.
 - Everything is in THB, using the account's actual THB cash flows
   (`total_amount_thb`), so FX movement at time of trade is included.
 - Tables are click-to-sort (vanilla JS, no dependencies).
