@@ -113,7 +113,10 @@ def compute_analytics(transactions: list[dict]) -> dict:
         is_sell = row.get("transaction_type") == "Sell"
         cash_flows.append(
             {
+                "security": security,
                 "date": trade_date,
+                "units": -units if is_sell else units,
+                "unit_price": _to_float(row.get("unit_price")),
                 "thb": total_thb if is_sell else -total_thb,
                 "usd": None if total_usd is None else (total_usd if is_sell else -total_usd),
             }

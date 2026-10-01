@@ -77,13 +77,16 @@ browser (it's a local file, `file://...`, no hosting involved).
   total gain (realized P&L + today's market value of open positions) is
   compared with the mirror's, along with each side's annualized
   money-weighted return (XIRR). The trade log also shows what SPY returned
-  over each closed trade's holding period, with a ✓ where you beat it. Both
+  over each closed trade's holding period, with a ✓ where you beat it, and a
+  **chart** plots both total gains day by day since your first trade (hover
+  for values, arrow keys when focused, or "Show as table" for month-end
+  numbers). Holdings are valued at each day's close and USD/THB rate. Both
   sides are price-return only (no dividends), valued at today's USD/THB; the
   mirror pays no fees.
 - **Market prices** come from Yahoo Finance's public chart endpoint
-  (`src/market_data.py`, no API key). Only ticker symbols (SPY, THB=X and the
-  tickers you currently hold) and a date range are sent — nothing about your
-  account. If it's unreachable, the dashboard still builds and just shows a
+  (`src/market_data.py`, no API key). Only ticker symbols (SPY, THB=X and
+  every ticker you've traded, for the chart) and a date range are sent —
+  nothing about your account. If it's unreachable, the dashboard still builds and just shows a
   "comparison unavailable" note.
 - Tables are click-to-sort (vanilla JS, no dependencies).
 - If a sell has no matching buy on record (e.g. a holding pre-dating your

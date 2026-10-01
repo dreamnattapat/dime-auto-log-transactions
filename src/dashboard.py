@@ -2,6 +2,7 @@
 static HTML file — no server, no build step, just open it in a browser.
 """
 import html
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -10,11 +11,13 @@ CSS = """
     color-scheme: light dark;
     --bg: #f7f7f8; --card: #ffffff; --text: #1a1a1a; --muted: #6b7280;
     --border: #e5e7eb; --green: #16a34a; --red: #dc2626; --accent: #2563eb;
+    --series-you: #2a78d6; --series-spy: #eb6834; --baseline: #c3c2b7;
 }
 @media (prefers-color-scheme: dark) {
     :root {
         --bg: #0f1115; --card: #181b21; --text: #e5e7eb; --muted: #9ca3af;
         --border: #2a2e37; --green: #4ade80; --red: #f87171; --accent: #60a5fa;
+        --series-you: #3987e5; --series-spy: #d95926; --baseline: #454a55;
     }
 }
 * { box-sizing: border-box; }
@@ -44,6 +47,32 @@ tr:last-child td { border-bottom: none; }
 .table-wrap { max-height: 480px; overflow-y: auto; border-radius: 10px; }
 .table-wrap table { border-radius: 0; }
 .note { color: var(--muted); font-size: 0.8rem; margin-top: -1.25rem; }
+.chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1rem 0.5rem; margin-top: 1.25rem; position: relative; }
+.chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0.5rem 1.5rem; margin-bottom: 0.5rem; }
+.chart-head h3 { font-size: 0.9rem; margin: 0; }
+.legend { display: flex; gap: 1.25rem; font-size: 0.8rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+.key { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart svg:focus { outline: none; }
+.chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.chart .grid { stroke: var(--border); stroke-width: 1; }
+.chart .zero { stroke: var(--baseline); stroke-width: 1; }
+.chart .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .end-label { fill: var(--text); font-size: 12px; font-weight: 600; }
+.chart .end-name { fill: var(--muted); font-size: 11px; }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .dot { stroke: var(--card); stroke-width: 2; }
+.chart .cross { stroke: var(--muted); stroke-width: 1; }
+.tip { position: absolute; pointer-events: none; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.65rem; font-size: 0.8rem; box-shadow: 0 4px 16px rgba(0,0,0,0.12); min-width: 170px; }
+.tip .tip-date { color: var(--muted); margin-bottom: 0.3rem; }
+.tip .tip-row { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.15rem; }
+.tip .tip-row strong { font-variant-numeric: tabular-nums; }
+.tip .tip-row .name { color: var(--muted); margin-left: auto; padding-left: 0.75rem; }
+.tip .tip-diff { border-top: 1px solid var(--border); margin-top: 0.4rem; padding-top: 0.35rem; color: var(--muted); }
+details.table-view { margin-top: 0.5rem; font-size: 0.8rem; }
+details.table-view summary { color: var(--muted); cursor: pointer; padding: 0.25rem 0 0.5rem; }
+details.table-view table { margin-bottom: 0.5rem; }
 .card .sub { color: var(--muted); font-size: 0.8rem; margin-top: 0.1rem; font-variant-numeric: tabular-nums; }
 """
 
@@ -119,6 +148,223 @@ def _fmt_pct(value: float | None) -> str:
     return f"{value:+.1f}%" if value is not None else "–"
 
 
+CHART_JS = r"""
+(function () {
+    const root = document.getElementById('spy-chart');
+    if (!root) return;
+    const pts = JSON.parse(document.getElementById('spy-chart-data').textContent)
+        .map(p => ({ t: new Date(p.date + 'T00:00:00').getTime(), date: p.date, you: p.you, spy: p.spy }));
+    const svg = root.querySelector('svg');
+    const tip = root.parentElement.querySelector('.tip');
+    const NS = 'http://www.w3.org/2000/svg';
+    const H = 300;
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    let idx = null, geom = null;
+
+    function el(name, attrs, parent) {
+        const node = document.createElementNS(NS, name);
+        for (const k in attrs) node.setAttribute(k, attrs[k]);
+        (parent || svg).appendChild(node);
+        return node;
+    }
+    function compact(v) {
+        const a = Math.abs(v), sign = v < 0 ? '−' : '';
+        if (a >= 1e6) return sign + '฿' + (a / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (a >= 1e3) return sign + '฿' + (a / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'K';
+        return sign + '฿' + a.toFixed(0);
+    }
+    function signed(v) {
+        return (v > 0 ? '+' : v < 0 ? '−' : '') + '฿' + Math.abs(Math.round(v)).toLocaleString('en-US');
+    }
+    function niceStep(range, count) {
+        const raw = range / count, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+        for (const m of [1, 2, 2.5, 5, 10]) if (m * mag >= raw) return m * mag;
+        return 10 * mag;
+    }
+    function fmtDate(d) {
+        const dt = new Date(d + 'T00:00:00');
+        return dt.getDate() + ' ' + MONTHS[dt.getMonth()] + ' ' + dt.getFullYear();
+    }
+
+    function render() {
+        svg.textContent = '';
+        const W = root.clientWidth;
+        const wide = W >= 560;
+        const m = { top: 12, right: wide ? 104 : 12, bottom: 26, left: 52 };
+        const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
+        svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+        svg.setAttribute('height', H);
+
+        const vals = pts.flatMap(p => [p.you, p.spy]);
+        let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+        const step = niceStep(hi - lo || 1, 5);
+        lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+        const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+        const x = t => m.left + (t1 === t0 ? iw / 2 : (t - t0) / (t1 - t0) * iw);
+        const y = v => m.top + (hi - v) / (hi - lo) * ih;
+        geom = { x, y, m, iw, ih, W };
+
+        // Gridlines + y ticks
+        for (let v = lo; v <= hi + step / 2; v += step) {
+            el('line', { x1: m.left, x2: m.left + iw, y1: y(v), y2: y(v), class: Math.abs(v) < step / 2 ? 'zero' : 'grid' });
+            const label = el('text', { x: m.left - 8, y: y(v) + 4, 'text-anchor': 'end', class: 'tick' });
+            label.textContent = Math.abs(v) < step / 2 ? '0' : compact(v);
+        }
+        // X ticks: first trading day of each month, thinned to fit
+        const monthStarts = pts.filter((p, i) => i === 0 || new Date(p.t).getMonth() !== new Date(pts[i - 1].t).getMonth());
+        const every = Math.max(1, Math.ceil(monthStarts.length / Math.max(2, Math.floor(iw / 80))));
+        let lastYear = null;
+        monthStarts.forEach((p, i) => {
+            if (i % every) return;
+            const d = new Date(p.t);
+            const label = el('text', { x: x(p.t), y: H - 6, 'text-anchor': i === 0 ? 'start' : 'middle', class: 'tick' });
+            // Year on the first label, then on the first label of each new year.
+            const year = d.getFullYear() !== lastYear ? " '" + String(d.getFullYear()).slice(2) : '';
+            lastYear = d.getFullYear();
+            label.textContent = MONTHS[d.getMonth()] + year;
+        });
+
+        // Lines: S&P first so "you" draws on top
+        for (const [key, color] of [['spy', '--series-spy'], ['you', '--series-you']]) {
+            const d = pts.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + y(p[key]).toFixed(1)).join('');
+            el('path', { d, class: 'line', style: `stroke: var(${color})` });
+        }
+        // End dots + direct labels (only when they won't collide)
+        const last = pts[pts.length - 1];
+        const ends = [['you', 'You', '--series-you'], ['spy', 'S&P 500', '--series-spy']];
+        const apart = Math.abs(y(last.you) - y(last.spy)) >= 30;
+        for (const [key, name, color] of ends) {
+            el('circle', { cx: x(last.t), cy: y(last[key]), r: 4, class: 'dot', style: `fill: var(${color})` });
+            if (wide && apart) {
+                const v = el('text', { x: x(last.t) + 10, y: y(last[key]) - 1, class: 'end-label' });
+                v.textContent = signed(last[key]);
+                const n = el('text', { x: x(last.t) + 10, y: y(last[key]) + 13, class: 'end-name' });
+                n.textContent = name;
+            }
+        }
+        // Hover layer: crosshair + dots, created once per render
+        geom.cross = el('line', { y1: m.top, y2: m.top + ih, class: 'cross', visibility: 'hidden' });
+        geom.dots = ends.map(([key, , color]) => el('circle', { r: 4, class: 'dot', style: `fill: var(${color})`, visibility: 'hidden' }));
+        if (idx !== null) show(idx);
+    }
+
+    function show(i) {
+        idx = i;
+        const p = pts[i], { x, y, cross, dots, W } = geom;
+        cross.setAttribute('x1', x(p.t)); cross.setAttribute('x2', x(p.t));
+        cross.setAttribute('visibility', 'visible');
+        [['you', dots[0]], ['spy', dots[1]]].forEach(([key, dot]) => {
+            dot.setAttribute('cx', x(p.t)); dot.setAttribute('cy', y(p[key])); dot.setAttribute('visibility', 'visible');
+        });
+
+        tip.textContent = '';
+        const date = document.createElement('div'); date.className = 'tip-date'; date.textContent = fmtDate(p.date);
+        tip.appendChild(date);
+        for (const [key, name, color] of [['you', 'You', '--series-you'], ['spy', 'S&P 500', '--series-spy']]) {
+            const row = document.createElement('div'); row.className = 'tip-row';
+            const k = document.createElement('span'); k.className = 'key'; k.style.background = `var(${color})`;
+            const v = document.createElement('strong'); v.textContent = signed(p[key]);
+            const n = document.createElement('span'); n.className = 'name'; n.textContent = name;
+            row.append(k, v, n); tip.appendChild(row);
+        }
+        const diff = document.createElement('div'); diff.className = 'tip-diff';
+        const gap = p.you - p.spy;
+        diff.textContent = (gap >= 0 ? 'Ahead by ' : 'Behind by ') + signed(Math.abs(gap)).replace('+', '');
+        tip.appendChild(diff);
+
+        tip.hidden = false;
+        const box = root.getBoundingClientRect(), card = root.parentElement.getBoundingClientRect();
+        const px = box.left - card.left + x(p.t);
+        const left = px + 14 + tip.offsetWidth > card.width ? px - 14 - tip.offsetWidth : px + 14;
+        tip.style.left = left + 'px';
+        tip.style.top = (box.top - card.top + 16) + 'px';
+    }
+    function hide() {
+        idx = null; tip.hidden = true;
+        if (!geom) return;
+        geom.cross.setAttribute('visibility', 'hidden');
+        geom.dots.forEach(d => d.setAttribute('visibility', 'hidden'));
+    }
+    function nearest(clientX) {
+        const r = svg.getBoundingClientRect();
+        const px = (clientX - r.left) * (geom.W / r.width);
+        const t = pts[0].t + (px - geom.m.left) / geom.iw * (pts[pts.length - 1].t - pts[0].t);
+        let best = 0;
+        for (let i = 1; i < pts.length; i++) if (Math.abs(pts[i].t - t) < Math.abs(pts[best].t - t)) best = i;
+        return best;
+    }
+
+    svg.addEventListener('pointermove', e => show(nearest(e.clientX)));
+    svg.addEventListener('pointerleave', hide);
+    svg.addEventListener('focus', () => show(idx ?? pts.length - 1));
+    svg.addEventListener('blur', hide);
+    svg.addEventListener('keydown', e => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        const i = (idx ?? pts.length - 1) + (e.key === 'ArrowRight' ? 1 : -1);
+        show(Math.max(0, Math.min(pts.length - 1, i)));
+    });
+    let raf;
+    window.addEventListener('resize', () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(render); });
+    render();
+})();
+"""
+
+
+def _month_end_rows(points: list[dict]) -> str:
+    rows = []
+    for i, p in enumerate(points):
+        if i + 1 < len(points) and points[i + 1]["date"][:7] == p["date"][:7]:
+            continue  # keep the last trading day of each month (and today)
+        gap = p["you"] - p["spy"]
+        rows.append(f"""<tr>
+            <td>{p['date']}</td>
+            <td>{_pnl_span(p['you'])}</td>
+            <td>{_pnl_span(p['spy'])}</td>
+            <td>{_pnl_span(gap)}</td>
+        </tr>""")
+    return "".join(rows)
+
+
+def _timeline_chart(timeline: dict | None) -> str:
+    if not timeline or len(timeline["points"]) < 2:
+        return ""
+    # Escape "</" so the JSON can't close the script tag early.
+    data = json.dumps(
+        [{"date": p["date"], "you": round(p["you"], 2), "spy": round(p["spy"], 2)} for p in timeline["points"]]
+    ).replace("</", "<\\/")
+    approx = ""
+    if timeline["approximated"]:
+        approx = (
+            f"<p class=\"note\" style=\"margin-top:0.25rem;\">No market price history for "
+            f"{_esc(', '.join(timeline['approximated']))}; valued at your last trade price while held.</p>"
+        )
+    return f"""
+        <div class="chart-card">
+            <div class="chart-head">
+                <h3>Total gain over time (THB)</h3>
+                <div class="legend">
+                    <span><i class="key" style="background:var(--series-you)"></i>You</span>
+                    <span><i class="key" style="background:var(--series-spy)"></i>Same money in S&amp;P 500</span>
+                </div>
+            </div>
+            <div class="chart" id="spy-chart">
+                <svg tabindex="0" role="img" aria-label="Line chart of your total gain versus the same money in the S&amp;P 500 over time. Use left and right arrow keys to step through days."></svg>
+            </div>
+            <div class="tip" hidden></div>
+            <script type="application/json" id="spy-chart-data">{data}</script>
+            <details class="table-view">
+                <summary>Show as table (month-end)</summary>
+                <div class="scroll"><table>
+                    <thead><tr><th>Date</th><th>You</th><th>S&amp;P 500</th><th>Difference</th></tr></thead>
+                    <tbody>{_month_end_rows(timeline['points'])}</tbody>
+                </table></div>
+            </details>
+            {approx}
+        </div>
+    """
+
+
 def _benchmark_section(b: dict | None) -> str:
     if not b:
         return ""
@@ -156,6 +402,7 @@ def _benchmark_section(b: dict | None) -> str:
             Valued at ฿{b['usd_thb']:.2f}/USD as of {b['as_of']:%Y-%m-%d}. Price return only — dividends
             excluded on both sides; the mirror pays no fees. % / yr is money-weighted (XIRR).
         </p>
+        {_timeline_chart(b.get('timeline'))}
     </section>
     """
 
@@ -286,7 +533,7 @@ def render_html(analytics: dict, generated_at: datetime) -> str:
     {_open_positions_table(analytics['open_positions'])}
     {_trade_log_table(analytics['trades'])}
 </div>
-<script>{JS}</script>
+<script>{JS}{CHART_JS}</script>
 </body>
 </html>
 """

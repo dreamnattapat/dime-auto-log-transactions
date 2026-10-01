@@ -17,11 +17,22 @@ _TIMEOUT_S = 15
 
 
 class PriceSeries:
-    def __init__(self, symbol: str, closes: list[tuple[date, float]], latest: float):
+    def __init__(
+        self,
+        symbol: str,
+        closes: list[tuple[date, float]],
+        latest: float,
+        splits: list[tuple[date, float]] | None = None,
+    ):
         self.symbol = symbol
         self._dates = [d for d, _ in closes]
         self._closes = [c for _, c in closes]
         self.latest = latest
+        self.splits = splits or []  # (date, ratio), e.g. 4.0 for a 4:1 split
+
+    @property
+    def dates(self) -> list[date]:
+        return list(self._dates)
 
     def on(self, day: date) -> float:
         """Close on `day`, or the last trading day before it."""
@@ -29,6 +40,15 @@ class PriceSeries:
         if i == 0:
             raise LookupError(f"No {self.symbol} price on or before {day}")
         return self._closes[i - 1]
+
+    def split_factor_after(self, day: date) -> float:
+        """Closes are split-adjusted back through history, so a share actually
+        held on `day` is worth close * this factor (product of later splits)."""
+        factor = 1.0
+        for split_date, ratio in self.splits:
+            if split_date > day:
+                factor *= ratio
+        return factor
 
 
 def yahoo_symbol(security: str) -> str:
@@ -49,6 +69,7 @@ def fetch_prices(symbol: str, start: date, end: date | None = None) -> PriceSeri
             "period1": _epoch(start - timedelta(days=7)),
             "period2": _epoch(end + timedelta(days=1)),
             "interval": "1d",
+            "events": "split",
         }
     )
     request = Request(_URL.format(symbol=symbol, query=query), headers=_HEADERS)
@@ -70,4 +91,12 @@ def fetch_prices(symbol: str, start: date, end: date | None = None) -> PriceSeri
     if not closes:
         raise LookupError(f"No closing prices for {symbol} in range")
     latest = result["meta"].get("regularMarketPrice") or closes[-1][1]
-    return PriceSeries(symbol, closes, latest)
+    splits = [
+        (
+            datetime.fromtimestamp(event["date"] + offset, tz=timezone.utc).date(),
+            event["numerator"] / event["denominator"],
+        )
+        for event in (result.get("events") or {}).get("splits", {}).values()
+        if event.get("denominator")
+    ]
+    return PriceSeries(symbol, closes, latest, splits)
